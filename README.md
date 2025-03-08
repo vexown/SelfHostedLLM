@@ -2,7 +2,7 @@
 
 Prerequisites:
 
-1. Register on HuggingFace and request access to Llama 3 - https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct
+1. Register on HuggingFace and request access to Llama 3.2 - https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct
 
 2. Create huggingface_token.txt in this directory with your token
 
