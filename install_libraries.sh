@@ -9,3 +9,6 @@ pip install transformers
 
 # (Optional) Install bitsandbytes if you want to run the model in 8-bit mode
 pip install bitsandbytes
+
+# (Optional) Install accelerate if you want to run the model with PyTorch Lightning
+pip install accelerate
