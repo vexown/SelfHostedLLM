@@ -1,6 +1,9 @@
 # Virtual Environment
 llama_env/
 
+# Model files
+llama-3-8b-instruct
+
 # Python cache files
 __pycache__/
 *.py[cod]
@@ -40,3 +43,6 @@ venv.bak/
 *.pt
 *.pth
 *.ckpt
+
+# HuggingFace token
+huggingface_token.txt
