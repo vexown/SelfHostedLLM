@@ -22,7 +22,7 @@ Prerequisites:
 
 Quick Start step-by-step:
 
-1. ./start_env.sh
+1. ./prepare_env.sh
 
 2. source llama_env/bin/activate
 
