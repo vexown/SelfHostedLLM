@@ -3,6 +3,7 @@ llama_env/
 
 # Model files
 llama-3-8b-instruct
+llama-3.2-1b-instruct
 
 # Python cache files
 __pycache__/
