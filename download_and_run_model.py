@@ -81,7 +81,7 @@ def generate_response(input_text, model, tokenizer, device='auto'):
     else:
         outputs = model.generate(
             **inputs,             # Input prompt
-            max_length=300,       # Maximum output length (in tokens)
+            max_new_tokens=200,   # Maximum number of tokens to generate
             do_sample=True,       # Enable sampling (or use greedy decoding for deterministic output by setting to False)
             temperature=0.2,      # Temperature (higher means more random, lower means more deterministic) - set to None if greedy decoding is enabled
             top_p=0.9,            # Nucleus sampling (top_p = 0.9 means 90% of the cumulative probability mass is considered). 
