@@ -10,6 +10,8 @@ import os
 import time
 import argparse
 
+conversation_history = ""
+
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Run Llama 3.2 1B model locally')
 parser.add_argument('--prompt', type=str, 
@@ -54,17 +56,42 @@ tokenizer = AutoTokenizer.from_pretrained(local_model_path, trust_remote_code=Tr
 tokenizer.pad_token = tokenizer.eos_token  # Ensure padding token is properly set
 
 # Function to generate response
-def generate_response(input_text, model, tokenizer, device='auto'):
+def generate_response(input_text, model, tokenizer, device='auto', remember_history=True):
+    global conversation_history
+    
     print(f"\nPrompt: {input_text}")
     
-    # Add a system prompt for better instructions
-    full_prompt = "You are an experienced electronics engineer providing concise, accurate answers. Please respond directly to the question: " + input_text
+    # Track memory before prompt processing
+    if torch.cuda.is_available() and device != 'cpu':
+        memory_before = torch.cuda.memory_allocated() / 1024**2
+        print(f"GPU Memory before processing: {memory_before:.2f} MB")
+    
+    if remember_history:
+        # Append the new input to the conversation history
+        if conversation_history:
+            conversation_history += f"\nUser: {input_text}"
+            full_prompt = f"You are an experienced electronics engineer. This is a conversation history, please respond to the last question:\n{conversation_history}"
+        else:
+            conversation_history = f"User: {input_text}"
+            full_prompt = f"You are an experienced electronics engineer. Please respond to: {input_text}"
+            
+        # Calculate tokens in conversation history
+        history_tokens = len(tokenizer.encode(conversation_history))
+        print(f"Conversation history length: {history_tokens} tokens")
+    else:
+        # Original single-turn behavior
+        full_prompt = "You are an experienced electronics engineer providing concise, accurate answers. Please respond directly to the question: " + input_text
     
     # Prepare input
     if device == 'cpu':
         inputs = tokenizer(full_prompt, return_tensors="pt")
     else:
         inputs = tokenizer(full_prompt, return_tensors="pt").to('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Track memory after preparing input
+    if torch.cuda.is_available() and device != 'cpu':
+        memory_after_tokenizing = torch.cuda.memory_allocated() / 1024**2
+        print(f"GPU Memory after tokenizing: {memory_after_tokenizing:.2f} MB (Δ +{memory_after_tokenizing - memory_before:.2f} MB)")
     
     # Generate with timing
     print("Generating response...")
@@ -92,6 +119,15 @@ def generate_response(input_text, model, tokenizer, device='auto'):
         )
     
     gen_time = time.time() - gen_start_time
+    
+    # Track memory after generation
+    if torch.cuda.is_available() and device != 'cpu':
+        memory_after_generation = torch.cuda.memory_allocated() / 1024**2
+        print(f"GPU Memory after generation: {memory_after_generation:.2f} MB (Δ +{memory_after_generation - memory_before:.2f} MB)")
+        
+        # Add warning if approaching memory limits
+        if memory_after_generation > 5000:  # Warning at ~5GB for 6GB card
+            print("⚠️ WARNING: Memory usage is high. Consider resetting conversation with 'reset' command.")
     
     # Process output
     generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -130,10 +166,14 @@ try:
         print("Type 'exit' to quit the program\n")
         
         while True:
-            user_input = input("Enter your prompt (or type 'exit' to quit): ")
+            user_input = input("Enter your prompt (or type 'exit' to quit, 'reset' to clear history): ")
             if user_input.lower() == 'exit':
                 print("Exiting interactive mode...")
                 break
+            elif user_input.lower() == 'reset':
+                conversation_history = ""
+                print("Conversation history has been reset.")
+                continue
             generate_response(user_input, model, tokenizer)
     else:
         # Single prompt mode
