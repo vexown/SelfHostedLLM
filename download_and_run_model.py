@@ -12,8 +12,10 @@ import argparse
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Run Llama 3.2 1B model locally')
-parser.add_argument('--prompt', type=str, default="What is the capital of France?", 
-                    help='Text prompt for the model')
+parser.add_argument('--prompt', type=str, 
+                    help='Text prompt for the model (optional, starts interactive mode if not provided)')
+parser.add_argument('--interactive', action='store_true',
+                    help='Start in interactive mode regardless of prompt argument')
 args = parser.parse_args()
 
 # Ensure required libraries are installed
@@ -27,8 +29,8 @@ except ImportError:
 torch.cuda.empty_cache()
 
 # Set the model and local path
-model_name = "meta-llama/Llama-3.2-1B-Instruct"
-local_model_path = "./llama-3.2-1b-instruct"
+model_name = "meta-llama/Llama-3.2-3B-Instruct"
+local_model_path = "./llama-3.2-3b-instruct"
 
 # Read the Hugging Face token from file
 try:
@@ -46,17 +48,57 @@ if not os.path.exists(local_model_path):
 else:
     print(f"Model already exists at {local_model_path}")
 
-# Set up 8-bit quantization config for better stability
-bnb_config = BitsAndBytesConfig(
-    load_in_8bit=True,       # 8-bit quantization for stability
-    llm_int8_enable_fp32_cpu_offload=True  # Allow CPU offloading
-)
-
 # Load the tokenizer
 print("Loading tokenizer...")
 tokenizer = AutoTokenizer.from_pretrained(local_model_path, trust_remote_code=True)
 tokenizer.pad_token = tokenizer.eos_token  # Ensure padding token is properly set
 
+# Function to generate response
+def generate_response(input_text, model, tokenizer, device='auto'):
+    print(f"\nPrompt: {input_text}")
+    
+    # Add a system prompt for better instructions
+    full_prompt = "You are an experienced electronics engineer providing concise, accurate answers. Please respond directly to the question: " + input_text
+    
+    # Prepare input
+    if device == 'cpu':
+        inputs = tokenizer(full_prompt, return_tensors="pt")
+    else:
+        inputs = tokenizer(full_prompt, return_tensors="pt").to('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Generate with timing
+    print("Generating response...")
+    gen_start_time = time.time()
+    
+    # Generation parameters
+    if device == 'cpu':
+        outputs = model.generate(
+            **inputs,
+            max_length=50,  # Reduced for CPU performance
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id
+        )
+    else:
+        outputs = model.generate(
+            **inputs,             # Input prompt
+            max_length=300,       # Maximum output length (in tokens)
+            do_sample=True,       # Enable sampling (or use greedy decoding for deterministic output by setting to False)
+            temperature=0.2,      # Temperature (higher means more random, lower means more deterministic) - set to None if greedy decoding is enabled
+            top_p=0.9,            # Nucleus sampling (top_p = 0.9 means 90% of the cumulative probability mass is considered). 
+                                  # In simple terms, it sets a threshold to avoid unlikely words in the output. (set to None if greedy decoding is enabled)
+            repetition_penalty=1.2,  # Adjusts the likelihood of tokens that have already appeared in the text
+            num_return_sequences=1,  # Number of alternative responses to generate
+            pad_token_id=tokenizer.eos_token_id  # Padding token (end of sequence) to avoid generating unnecessary tokens after the prompt is finished
+        )
+    
+    gen_time = time.time() - gen_start_time
+    
+    # Process output
+    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    print(f"\nResponse: {generated_text}")
+    print(f"Generation completed in {gen_time:.2f} seconds")
+
+# Main execution
 try:
     # Load the model with stable configuration
     print("Loading model...")
@@ -64,8 +106,11 @@ try:
     
     model = AutoModelForCausalLM.from_pretrained(
         local_model_path,
-        quantization_config=bnb_config,  # Use 8-bit quantization
-        device_map="auto",               # Distribute across available hardware
+        quantization_config=BitsAndBytesConfig(
+            load_in_8bit=True,
+            llm_int8_enable_fp32_cpu_offload=True
+        ),
+        device_map="auto",
         trust_remote_code=True,
         torch_dtype=torch.float16
     )
@@ -79,33 +124,20 @@ try:
         print(f"GPU Memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
         print(f"GPU Memory reserved: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
     
-    # Get user prompt or use default
-    input_text = args.prompt
-    print(f"\nPrompt: {input_text}")
-    
-    # Prepare input
-    inputs = tokenizer(input_text, return_tensors="pt").to('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    # Generate with timing
-    print("Generating response...")
-    gen_start_time = time.time()
-    
-    # Use conservative generation parameters
-    outputs = model.generate(
-        **inputs,
-        max_length=100,
-        do_sample=False,  # Greedy decoding
-        temperature=None,  # Remove conflicting parameter
-        top_p=None,        # Remove conflicting parameter
-        pad_token_id=tokenizer.eos_token_id
-    )
-    
-    gen_time = time.time() - gen_start_time
-    
-    # Process output
-    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    print(f"\nResponse: {generated_text}")
-    print(f"Generation completed in {gen_time:.2f} seconds")
+    # Check if we should run in interactive mode or single prompt mode
+    if args.interactive or args.prompt is None:
+        print("\n===== Interactive Mode =====")
+        print("Type 'exit' to quit the program\n")
+        
+        while True:
+            user_input = input("Enter your prompt (or type 'exit' to quit): ")
+            if user_input.lower() == 'exit':
+                print("Exiting interactive mode...")
+                break
+            generate_response(user_input, model, tokenizer)
+    else:
+        # Single prompt mode
+        generate_response(args.prompt, model, tokenizer)
 
 except RuntimeError as e:
     print(f"GPU inference failed with error: {e}")
@@ -125,23 +157,17 @@ except RuntimeError as e:
         low_cpu_mem_usage=True
     )
     
-    # Get user prompt or use default
-    input_text = args.prompt
-    print(f"\nPrompt: {input_text}")
-    
-    inputs = tokenizer(input_text, return_tensors="pt")
-    
-    print("Generating response (CPU mode)...")
-    cpu_gen_start = time.time()
-    
-    outputs = model.generate(
-        **inputs,
-        max_length=50,  # Reduced for CPU performance
-        do_sample=False
-    )
-    
-    cpu_gen_time = time.time() - cpu_gen_start
-    
-    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    print(f"\nResponse: {generated_text}")
-    print(f"CPU generation completed in {cpu_gen_time:.2f} seconds")
+    # Check if we should run in interactive mode or single prompt mode
+    if args.interactive or args.prompt is None:
+        print("\n===== Interactive Mode (CPU) =====")
+        print("Type 'exit' to quit the program\n")
+        
+        while True:
+            user_input = input("Enter your prompt (or type 'exit' to quit): ")
+            if user_input.lower() == 'exit':
+                print("Exiting interactive mode...")
+                break
+            generate_response(user_input, model, tokenizer, device='cpu')
+    else:
+        # Single prompt mode
+        generate_response(args.prompt, model, tokenizer, device='cpu')
