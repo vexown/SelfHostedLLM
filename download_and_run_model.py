@@ -59,28 +59,39 @@ tokenizer.pad_token = tokenizer.eos_token  # Ensure padding token is properly se
 def generate_response(input_text, model, tokenizer, device='auto', remember_history=True):
     global conversation_history
     
-    print(f"\nPrompt: {input_text}")
+    print(f"\nPrompt: {input_text}")  # Only show current prompt
     
     # Track memory before prompt processing
     if torch.cuda.is_available() and device != 'cpu':
         memory_before = torch.cuda.memory_allocated() / 1024**2
-        print(f"GPU Memory before processing: {memory_before:.2f} MB")
+        print(f"\nGPU Memory before processing: {memory_before:.2f} MB")
     
     if remember_history:
-        # Append the new input to the conversation history
+        # Append the new input to the conversation history with clear roles
         if conversation_history:
-            conversation_history += f"\nUser: {input_text}"
-            full_prompt = f"You are an experienced electronics engineer. This is a conversation history, please respond to the last question:\n{conversation_history}"
-        else:
-            conversation_history = f"User: {input_text}"
-            full_prompt = f"You are an experienced electronics engineer. Please respond to: {input_text}"
+            # Add user message with clear attribution
+            conversation_history += f"\nHuman: {input_text}"
             
-        # Calculate tokens in conversation history
+            # Format prompt with clear roles and instructions
+            full_prompt = (
+                "You are an AI assistant with expertise in electronics engineering. "
+                "Below is a conversation history. Respond ONLY to the most recent message "
+                "from the Human, without repeating or extending the conversation history." 
+                "Do NOT make up additional Human messages, respond only the the provided prompt."
+                "Make your answers concise. \n\n"
+                f"{conversation_history}\n\nAssistant:"
+            )
+        else:
+            # First message in conversation
+            conversation_history = f"Human: {input_text}"
+            full_prompt = f"You are an AI assistant with expertise in electronics engineering. Respond to: {input_text}\n\nAssistant:"
+            
+        # Calculate tokens in conversation history (keep this)
         history_tokens = len(tokenizer.encode(conversation_history))
         print(f"Conversation history length: {history_tokens} tokens")
     else:
         # Original single-turn behavior
-        full_prompt = "You are an experienced electronics engineer providing concise, accurate answers. Please respond directly to the question: " + input_text
+        full_prompt = "You are an AI assistant with expertise in electronics engineering. Respond directly to: " + input_text + "\n\nAssistant:"
     
     # Prepare input
     if device == 'cpu':
@@ -129,8 +140,21 @@ def generate_response(input_text, model, tokenizer, device='auto', remember_hist
         if memory_after_generation > 5000:  # Warning at ~5GB for 6GB card
             print("⚠️ WARNING: Memory usage is high. Consider resetting conversation with 'reset' command.")
     
-    # Process output
+    # Process output - extract only the model's response
     generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    
+    # Add the assistant's response to the conversation history
+    if remember_history:
+        # Extract just the model's answer by removing the prompt
+        assistant_response = generated_text
+        # Some models repeat the instruction, try to remove it if present
+        for prefix in ["Assistant:", "AI:"]:
+            if assistant_response.startswith(prefix):
+                assistant_response = assistant_response[len(prefix):].strip()
+        
+        # Add to history for next round
+        conversation_history += f"\nAssistant: {assistant_response}"
+    
     print(f"\nResponse: {generated_text}")
     print(f"Generation completed in {gen_time:.2f} seconds")
 
